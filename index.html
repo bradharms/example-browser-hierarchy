@@ -1,0 +1,274 @@
+<!doctype html>
+<html>
+  <!-- Browse the browser's JavaScript global object tree. -->
+  <head>
+    <style>
+      * {
+        font-family: Courier New, Courier, monospace;
+        box-sizing: border-box;
+        padding: 0;
+        margin: 0;
+      }
+
+      li {
+        list-style: none;
+        padding-left: 2ex;
+      }
+      
+      .list {
+        border: 1px solid silver;
+      }
+
+      .title {
+        cursor: pointer;
+        height: 100%;
+        clear: left;
+      }
+      .title::before {
+        content: '\25B8';
+        width: 3ex;
+        height: 100%;
+        display: block;
+        float: left;
+      }
+      .title > .key,
+      .title > .type,
+      .title > .value {
+        display: inline;
+      }
+      .title > .key {
+        font-weight: bold;
+      }
+      .title > .type {
+        font-style: italic;
+      }
+      .title > .type:not(.class)::before {
+        content: '\00A0:\00A0';
+      }
+      .title > .type.class::before {
+        content: '\00A0';
+      }
+      .title > .value::before {
+        content: '\00A0=\00A0';
+      }
+
+      .open > .title::before {
+        content: '\25BE';
+      }
+      .leaf > .title {
+        cursor: default;
+      }
+      .leaf > .title::before {
+        content: '\00A0';
+      }
+      :not(.leaf) > .title:hover {
+        background-color: #EEE;
+      }
+    </style>
+    <script>
+      'use strict';
+
+      (function () {
+        onload = function main() {
+          onload = null;
+          const objExplorer = new ObjExplorer(null, 'window', window);
+          objExplorer.draw();
+          document.getElementById('explorer').appendChild(objExplorer.element);
+        }
+
+        function getIsLeaf(obj) {
+          return (
+            obj === null ||
+            obj === undefined ||
+            [
+              'string',
+              'number',
+              'boolean'
+            ].indexOf(typeof obj) !== -1
+          );
+        }
+
+        function drawTitle(key, obj) {
+          const elTitle = document.createElement('div');
+          elTitle.classList.add('title');
+          
+          let elKey = document.createElement('div');
+          elKey.classList.add('key');
+          elKey.innerText = key;
+          elTitle.appendChild(elKey);
+
+          let typeStr;
+          let valueStr;
+          let isClass = false;
+          if (obj === null) {
+            valueStr = 'null';
+          } else if (
+            ['string', 'number', 'boolean'].indexOf(typeof obj) !== -1
+          ) {
+            typeStr = typeof obj;
+            valueStr = Object.is(obj, NaN) ? 'NaN' : JSON.stringify(obj);
+          } else if (typeof obj === 'function') {
+            typeStr = 'function';
+            if (obj.prototype && obj.prototype !== Object.prototype) {
+              isClass = true;
+              typeStr = `class `;
+              if (obj.prototype) {
+                const baseName = Object.getPrototypeOf(obj.prototype).constructor.name;
+                typeStr = `extends ${baseName}`;
+              }
+            }
+          } else if (obj !== undefined) {
+            typeStr = obj.constructor.name;
+            if (typeStr === 'Array') {
+              valueStr = '[ ... ]';
+            } else if (typeStr === 'Object') {
+              valueStr = '{ ... }';
+            }
+          }
+
+          if (typeStr) {
+            let elType = document.createElement('div');
+            elType.classList.add('type');
+            if (isClass) {
+              elType.classList.add('class');
+            }
+            elType.innerText = typeStr;
+            elTitle.appendChild(elType);
+          }
+          
+          if (valueStr) {
+            let elValue = document.createElement('div');
+            elValue.classList.add('value');
+            elValue.innerText = valueStr;
+            elTitle.appendChild(elValue);
+          }
+
+          return elTitle;
+        }
+
+        class ObjExplorer {
+          constructor(parentExplorer, parentKey, obj) {
+            this.parentExplorer = parentExplorer;
+            this.parentKey = parentKey;
+            this.obj = obj;
+            this.children = new WeakMap();
+            
+            let nodes = [this];
+            while (nodes[0].parentExplorer) {
+              nodes.unshift(nodes[0].parentExplorer);
+            }
+            this.id = nodes.map(n => n.parentKey).join('-');
+            
+            this.draw();
+          }
+
+          draw() {
+            const elContainer = this.element =
+              this.element || document.createElement('div');
+            [].slice.call(elContainer.classList).forEach(cls => {
+              elContainer.classList.remove(cls);
+            });
+            elContainer.classList.add('obj-explorer');
+            elContainer.classList.add(`obj-explorer-${this.parentKey}`);
+            elContainer.classList.add('open');
+            elContainer.id = this.id;
+            
+            let elTitle = elContainer.querySelector(':scope > .title');
+            if (!elTitle) {
+              elTitle = drawTitle(this.parentKey, this.obj);
+              elTitle.onclick = this.handleClickTitle();
+              elContainer.appendChild(elTitle);
+            }
+            
+            let elList = elContainer.querySelector(':scope > .list');
+            if (!elList) {
+              elList = document.createElement('ul');
+              elList.classList.add('list');
+              elContainer.appendChild(elList);
+            }
+
+            const proto = Object.getPrototypeOf(this.obj) || this.obj.prototype;
+            const childKeys = Object.getOwnPropertyNames(this.obj)
+              .concat(proto ? Object.getOwnPropertyNames(proto) : [])
+              .sort();
+            childKeys.forEach((childKey, i) => {
+              let value;
+              try {
+                value = this.obj[childKey];
+              } catch (e) { }
+              let elListItem =
+                elList.querySelector(`:scope > .list-item.list-item-${childKey}`);
+              if (!elListItem) {
+                elListItem = document.createElement('li');
+                elListItem.classList.add('list-item');
+                elListItem.classList.add(`list-item-${childKey}`);
+                if (i < childKeys.length - 1) {
+                  elList.insertBefore(
+                    elListItem,
+                    elList.querySelector(
+                      `:scope > .list-item.list-item-${childKeys[i + 1]}`
+                    )
+                  );
+                } else {
+                  elList.appendChild(elListItem);
+                }
+                let elListItemContent = elListItem.children[0];
+                if (!elListItemContent) {
+                  if (!this.children.has(value)) {
+                    elListItemContent = document.createElement('div');
+                    elListItemContent.classList.add('obj-explorer');
+                    elListItemContent.classList.add(`obj-explorer-${childKey}`);
+                    if (getIsLeaf(value)) {
+                      elListItemContent.classList.add('leaf');
+                    }
+                    elListItem.appendChild(elListItemContent);
+                    let elListItemContentTitle =
+                      elListItemContent.querySelector(':scope > .title');
+                    if (!elListItemContentTitle) {
+                      elListItemContentTitle = drawTitle(childKey, value);
+                      if (!getIsLeaf(value)) {
+                        elListItemContentTitle.onclick =
+                          this.handleClickChildTitle(childKey);
+                      }
+                      elListItemContent.appendChild(elListItemContentTitle);
+                    }
+                  } else {
+                    elListItemContent = this.children.get(value).element;
+                  }
+                  elListItem.appendChild(elListItemContent);
+                }
+              }
+            });
+          }
+
+          handleClickTitle() {
+            return () => {
+              if (!this.parentExplorer) {
+                return;
+              }
+              this.element.parentNode.remove(this.element);
+              this.parentExplorer.children.delete(this.obj);
+              this.parentExplorer.draw();
+            }
+          }
+
+          handleClickChildTitle(key) {
+            return () => {
+              const value = this.obj[key];
+              const child = new ObjExplorer(this, key, value);
+              this.children.set(value, child);
+              const el = this.element.querySelector(
+                `:scope > .list > .list-item.list-item-${key}`
+              );
+              el.parentNode.removeChild(el);
+              this.draw();
+            }
+          }
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="explorer" class="explorer-container"></div>
+  </body>
+</html>
